@@ -6,27 +6,34 @@ import random
 import time
 from multiprocessing import Pool, TimeoutError
 
+
 ## define tool functions
 def weight_variable(shape, initialization):
     if initialization == 'xavier':
         initializer = tf.contrib.layers.xavier_initializer()
         return tf.Variable(initializer(shape))
     elif initialization == 'random':
-        initial = tf.truncated_normal(shape, stddev = 0.1)
+        initial = tf.truncated_normal(shape, stddev=0.1)
         return tf.Variable(initial)
 
+
 def bias_variable(shape):
-    initial = tf.constant(0.1, shape = shape)
+    initial = tf.constant(0.1, shape=shape)
     return tf.Variable(initial)
+
 
 """
 卷积和池化，使用卷积步长为1（stride size）,0边距（padding size）
 池化用简单传统的2x2大小的模板做max pooling
 """
 
+
 def conv2d_bn(x, W, is_training, activation='relu', stride=1):
-    h_conv = tf.nn.conv2d(x, W, strides=[1, stride, stride, 1], padding = 'SAME')
-    h_conv = tf.layers.batch_normalization(h_conv, training=is_training)
+    h_conv = tf.nn.conv2d(x, W, strides=[1, stride, stride, 1], padding='SAME')
+
+    if(apply_batch_norm):
+        h_conv = tf.layers.batch_normalization(h_conv, training=is_training)
+
     if activation == 'relu':
         h_conv = tf.nn.relu(h_conv)
     elif activation == 'softmax':
@@ -38,17 +45,20 @@ def conv2d_bn(x, W, is_training, activation='relu', stride=1):
     # strides   : The stride of the sliding window for each dimension of input.
     #             For the most common case of the same horizontal and vertices strides, strides = [1, stride, stride, 1]
 
+
 def max_pool_2x2(x, size=2, stride=2):
-    return tf.nn.max_pool(x, ksize = [1, size, size, 1],
-                          strides = [1, stride, stride, 1], padding = 'SAME')
+    return tf.nn.max_pool(x, ksize=[1, size, size, 1],
+                          strides=[1, stride, stride, 1], padding='SAME')
     # tf.nn.max_pool(value, ksize, strides, padding, data_format='NHWC', name=None)
     # x(value)              : [batch, height, width, channels]
     # ksize(pool大小)        : A list of ints that has length >= 4. The size of the window for each dimension of the input tensor.
     # strides(pool滑动大小)   : A list of ints that has length >= 4. The stride of the sliding window for each dimension of the input tensor.  
 
+
 def fully_bn_layer(x, W, is_training, activation='relu'):
     h_fc = tf.matmul(x, W)
-    h_fc = tf.layers.batch_normalization(h_fc, training=is_training)
+    if(apply_batch_norm):
+        h_fc = tf.layers.batch_normalization(h_fc, training=is_training)
     if activation == 'relu':
         h_fc = tf.nn.relu(h_fc)
     elif activation == 'softmax':
@@ -56,20 +66,19 @@ def fully_bn_layer(x, W, is_training, activation='relu'):
     return h_fc
 
 
-
 def generate_model(test_filename, train_X, train_Y, test_X, test_Y):
     tf.reset_default_graph()
     is_training = tf.placeholder(tf.bool)
     keep_prob = tf.placeholder("float")
-    
+
     """
     第一层 卷积层
     x_image(batch, 28, 28, 1) -> h_pool1(batch, 14, 14, 32)
     """
-    x = tf.placeholder(tf.float32,[None, 784])    
-    x_image = tf.reshape(x, [-1, 28, 28, 1]) #最后一维代表通道数目，如果是rgb则为3 
+    x = tf.placeholder(tf.float32, [None, 784])
+    x_image = tf.reshape(x, [-1, 28, 28, 1])  # 最后一维代表通道数目，如果是rgb则为3
     W_conv1 = weight_variable([5, 5, 1, 32], initialization)
-    h_conv1 = conv2d_bn(x_image, W_conv1, is_training, 'relu') 
+    h_conv1 = conv2d_bn(x_image, W_conv1, is_training, 'relu')
     # x_image -> [batch, in_height, in_width, in_channels]
     #            [batch, 28, 28, 1]
     # W_conv1 -> [filter_height, filter_width, in_channels, out_channels]
@@ -119,29 +128,39 @@ def generate_model(test_filename, train_X, train_Y, test_X, test_Y):
     ADAM优化器来做梯度最速下降,feed_dict中加入参数keep_prob控制dropout比例
     """
     y_ = tf.placeholder("float", [None, 10])
-    cross_entropy = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=y_, logits=y_conv)) #计算交叉熵
+    cross_entropy = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels=y_, logits=y_conv))  # 计算交叉熵
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-    with tf.control_dependencies(update_ops):  
-        train_step = tf.train.AdamOptimizer(learning_rate).minimize(cross_entropy) #使用adam优化器来以0.0001的学习率来进行微调
-    correct_prediction = tf.equal(tf.argmax(y_conv,1), tf.argmax(y_,1)) #判断预测标签和实际标签是否匹配
-    accuracy = tf.reduce_mean(tf.cast(correct_prediction,"float"))
-        
+    with tf.control_dependencies(update_ops):
+        # train_step = tf.train.AdamOptimizer(learning_rate).minimize(cross_entropy)  # 使用adam优化器来以0.0001的学习率来进行微调
+        train_step = tf.train.AdamOptimizer(learning_rate).minimize(cross_entropy)  # 使用adam优化器来以0.0001的学习率来进行微调
+    correct_prediction = tf.equal(tf.argmax(y_conv, 1), tf.argmax(y_, 1))  # 判断预测标签和实际标签是否匹配
+    accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
+
     test_record = open(test_filename, 'w')
 
-    with tf.Session() as sess: 
-        init = tf.global_variables_initializer()  
+    with tf.Session() as sess:
+        init = tf.global_variables_initializer()
         sess.run(init)
-        for i in range(max_interations): 
+        for i in range(max_interations):
             indeces_small = random.sample(range(len(train_data)), batch_size)
             if i % 10 == 0:
-                train_accuracy = sess.run(accuracy,feed_dict = {x:train_X[indeces_small], y_:train_Y[indeces_small], keep_prob:1, is_training:False})
-                test_accuracy = sess.run(accuracy,feed_dict = {x:test_X, y_:test_Y, keep_prob:1, is_training:False})  
-                print("experiment %d, step %d, train_accuracy %g, test_accuracy %g" %(file_index, i, train_accuracy, test_accuracy))               
-                test_record.write(str(test_accuracy)+'\n')
-            sess.run(train_step, feed_dict = {x:train_data[indeces_small], y_:train_label[indeces_small], keep_prob:dropout_probability, is_training:True}) 
-   
-    test_record.close()
+                train_accuracy = sess.run(accuracy, feed_dict={x: train_X[indeces_small], y_: train_Y[indeces_small],
+                                                               keep_prob: 1, is_training: False})
+                test_accuracy = sess.run(accuracy, feed_dict={x: test_X, y_: test_Y, keep_prob: 1, is_training: False})
+                cost = sess.run(cross_entropy, feed_dict={x: train_X, y_: train_Y, keep_prob: 1, is_training: False})
 
+                print("experiment %d, step %d, train_accuracy %g, test_accuracy %g, cost %g" % (
+                    file_index, i, train_accuracy, test_accuracy, cost))
+                test_record.write(str(test_accuracy) + '\n')
+
+            partial_cost0 = sess.run(cross_entropy, feed_dict={x: train_X[indeces_small], y_: train_Y[indeces_small], keep_prob: 1, is_training: False})
+            sess.run(train_step, feed_dict={x: train_data[indeces_small], y_: train_label[indeces_small],
+                                            keep_prob: 1, is_training: True})
+            partial_cost1 = sess.run(cross_entropy, feed_dict={x: train_X[indeces_small], y_: train_Y[indeces_small], keep_prob: 1, is_training: False})
+
+            print("partial data cost reduction", partial_cost0-partial_cost1)
+
+    test_record.close()
 
 
 ## define hyper parameters
@@ -153,23 +172,24 @@ dropout_probability = 0.5
 initialization = 'random'
 max_interations = 1000
 batch_size = 128
+apply_batch_norm = False
 
-test_filename = './data/Benchmark_CNN/seed_'+str(random_seed)+'_training_size_'+str(training_size)+'_LR_'+str(learning_rate)+'_'+initialization+'_'+str(file_index)+'.txt'
+test_filename = './data/Benchmark_CNN/seed_' + str(random_seed) + '_training_size_' + str(training_size) + '_LR_' + str(
+    learning_rate) + '_' + initialization + '_' + str(file_index) + '.txt'
 
 ## download data
 mnist = input_data.read_data_sets("MNIST_data/", one_hot=True)
 Y_train = mnist.train.labels
-Y_train_label = np.where(Y_train==1)[1]
+Y_train_label = np.where(Y_train == 1)[1]
 
 random.seed(random_seed)
-positive_indeces = []     # randomly choose positive training set
+positive_indeces = []  # randomly choose positive training set
 for label in range(10):
-    indeces = list(np.where(Y_train_label==label)[0])
+    indeces = list(np.where(Y_train_label == label)[0])
     index_slice = random.sample(indeces, training_size)
     positive_indeces = positive_indeces + index_slice
 train_data = mnist.train.images[positive_indeces]
-train_label = mnist.train.labels[positive_indeces]  
-unlabeled_indeces = set(range(len(Y_train)))-set(positive_indeces)
+train_label = mnist.train.labels[positive_indeces]
+unlabeled_indeces = set(range(len(Y_train))) - set(positive_indeces)
 
 generate_model(test_filename, train_data, train_label, mnist.test.images, mnist.test.labels)
-
